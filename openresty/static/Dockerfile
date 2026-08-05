@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 
+# OpenResty base image with statically linked third-party modules.
+
 ARG RESTY_IMAGE_TAG="alpine:3.24.1"
 
 FROM ${RESTY_IMAGE_TAG} AS builder

@@ -26,7 +26,7 @@
 docker build \
     --build-arg OPENRESTY_IMAGE=zzwsec/openresty:1.31.1-alpine \
     --tag zzwsec/openresty:1.31.1-alpine-dynamic \
-    openresty-dynamic
+    openresty/dynamic
 ```
 
 默认构建结果以 `OPENRESTY_IMAGE` 为运行阶段基础镜像，并包含全部动态模块及其运行依赖。

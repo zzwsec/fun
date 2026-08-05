@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 
+# Dynamic modules layered on the OpenResty base image.
+
 ARG RESTY_IMAGE_TAG="alpine:3.24.1"
 ARG OPENRESTY_IMAGE="zzwsec/openresty:1.31.1-alpine"
 

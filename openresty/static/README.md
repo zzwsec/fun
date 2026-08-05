@@ -9,7 +9,7 @@
 ```shell
 docker build \
     --tag zzwsec/openresty:1.31.1-alpine \
-    openresty
+    openresty/static
 ```
 
 主要构建参数：
@@ -29,7 +29,7 @@ docker build \
 docker build \
     --build-arg RESTY_J=8 \
     --tag zzwsec/openresty:1.31.1-alpine \
-    openresty
+    openresty/static
 ```
 
 检查镜像：
