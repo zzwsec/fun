@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1
 
-# OpenResty base image with statically linked third-party modules.
-
 ARG RESTY_IMAGE_TAG="alpine:3.24.1"
 
 FROM ${RESTY_IMAGE_TAG} AS builder
 
 ARG RESTY_VERSION="1.31.1.1"
 ARG RESTY_J=""
+ARG RESTY_LUAROCKS_VERSION="3.13.0"
 
 ARG NGX_BROTLI_REPO="https://github.com/google/ngx_brotli.git"
 ARG NGX_ZSTD_REPO="https://github.com/tokers/zstd-nginx-module.git"
@@ -61,15 +60,16 @@ ARG _RESTY_CONFIG_DEPS="\
     "
 
 RUN apk add --no-cache \
-    build-base binutils cargo clang clang-dev cmake coreutils curl git \
-    linux-headers make perl-dev pkgconf readline-dev \
+    build-base binutils cargo clang clang-dev cmake coreutils curl wget git \
+    linux-headers make perl-dev pkgconf readline-dev unzip \
     zlib-dev zstd-dev zstd-static \
-    libgcc tzdata zlib
+    libgcc tzdata zlib mariadb-connector-c-dev
 
 RUN curl -sSfL "${RESTY_OPENSSL_URL_BASE}/openssl-${RESTY_OPENSSL_VERSION}.tar.gz" | tar zxf - -C /tmp/ \
     && curl -sSfL "https://raw.githubusercontent.com/openresty/openresty/master/patches/openssl-${RESTY_OPENSSL_PATCH_VERSION}-sess_set_get_cb_yield.patch" | patch -d "/tmp/openssl-${RESTY_OPENSSL_VERSION}" -p1 \
     && curl -sSfL "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${RESTY_PCRE_VERSION}/pcre2-${RESTY_PCRE_VERSION}.tar.gz" | tar zxf - -C /tmp/ \
     && curl -sSfL "https://openresty.org/download/openresty-${RESTY_VERSION}.tar.gz" | tar zxf - -C /tmp/ \
+    && curl -fsSL "https://luarocks.org/releases/luarocks-${RESTY_LUAROCKS_VERSION}.tar.gz" | tar xzf - -C /tmp \
     && git clone --depth=1 --recurse-submodules --shallow-submodules "${NGX_BROTLI_REPO}" "/tmp/openresty-${RESTY_VERSION}/ngx_brotli" \
     && git clone --depth=1 "${NGX_ZSTD_REPO}" "/tmp/openresty-${RESTY_VERSION}/ngx_zstd" \
     && git clone --depth=1 "${NGX_ACME_REPO}" "/tmp/openresty-${RESTY_VERSION}/ngx_http_acme_module"
@@ -128,22 +128,52 @@ RUN RESTY_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && make -j"${RESTY_BUILD_JOBS}" \
     && make -j"${RESTY_BUILD_JOBS}" install
 
-RUN rm -Rf \
+WORKDIR /tmp/luarocks-${RESTY_LUAROCKS_VERSION}
+RUN ./configure \
+        --prefix=/usr/local/luarocks \
+        --rocks-tree=/usr/local/openresty/luajit \
+        --with-lua=/usr/local/openresty/luajit \
+        --with-lua-include=/usr/local/openresty/luajit/include/luajit-2.1 \
+    && make \
+    && make install
+RUN export PATH=$PATH:/usr/local/luarocks/bin/ \
+    && CFLAGS="-O2 -fPIC" \
+        LDFLAGS="-L/usr/local/openresty/openssl3/lib -Wl,-rpath,/usr/local/openresty/openssl3/lib" \
+        luarocks install luaossl \
+        CRYPTO_INCDIR=/usr/local/openresty/openssl3/include \
+        CRYPTO_LIBDIR=/usr/local/openresty/openssl3/lib \
+        OPENSSL_INCDIR=/usr/local/openresty/openssl3/include \
+        OPENSSL_LIBDIR=/usr/local/openresty/openssl3/lib \
+    && luarocks install lapis \
+    && luarocks install lua-resty-mlcache \
+    && luarocks install lua-resty-jit-uuid \
+    && luarocks install luasql-mysql MYSQL_INCDIR=/usr/include/mysql
+
+# Remove OpenSSL, PCRE2, and LuaJIT build artifacts to reduce the runtime image size;
+# derived images may be unable to compile Lua rocks or native modules that depend on them.
+RUN rm -rf \
         /usr/local/openresty/openssl3/bin/c_rehash \
         /usr/local/openresty/openssl3/lib/*.a \
         /usr/local/openresty/openssl3/include \
     && find /usr/local/openresty/openssl3 -type f -perm -u+x -exec strip --strip-unneeded '{}' \; \
-    && rm -Rf \
+    && rm -rf \
         /usr/local/openresty/pcre2/bin \
         /usr/local/openresty/pcre2/share \
         /usr/local/openresty/pcre2/lib/*.a \
         /usr/local/openresty/pcre2/lib/*.la \
     && find /usr/local/openresty/pcre2 -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded '{}' \; \
-    && rm -Rf \
+    && rm -rf \
         /usr/local/openresty/luajit/lib/*.a \
         /usr/local/openresty/luajit/share/man \
     && find /usr/local/openresty/luajit -type f -perm -u+x -exec strip --strip-unneeded '{}' \; \
-    && find /usr/local/openresty/nginx -type f -perm -u+x -exec strip --strip-unneeded '{}' \;
+    && find /usr/local/openresty/nginx -type f -perm -u+x -exec strip --strip-unneeded '{}' \; \
+    && rm -rf \
+        /usr/local/openresty/pod \
+        /usr/local/openresty/resty.index \
+        /usr/local/openresty/bin/restydoc \
+        /usr/local/openresty/bin/restydoc-index \
+        /usr/local/openresty/bin/md2pod.pl \
+        /usr/local/openresty/bin/nginx-xml2pod
 
 RUN mkdir -p /etc/nginx/conf.d \
     && curl -fsSL \
@@ -166,7 +196,7 @@ ENV PATH="/usr/local/openresty/bin:/usr/local/openresty/nginx/sbin:/usr/local/op
 COPY --from=builder /usr/local/openresty/ /usr/local/openresty/
 COPY --from=builder /etc/nginx/ /etc/nginx/
 
-RUN apk add --no-cache libgcc tzdata zlib \
+RUN apk add --no-cache libgcc tzdata zlib mariadb-connector-c \
     && mkdir -p /var/run/openresty \
     && ln -sf /dev/stdout /usr/local/openresty/nginx/logs/access.log \
     && ln -sf /dev/stderr /usr/local/openresty/nginx/logs/error.log
