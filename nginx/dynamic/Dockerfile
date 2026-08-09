@@ -1,6 +1,8 @@
-ARG NGINX_VERSION
+ARG ALPINE_IMAGE="alpine:3.24.1"
+ARG NGINX_VERSION="1.31.3"
+ARG NGINX_IMAGE="zzwsec/nginx:${NGINX_VERSION}"
 
-FROM alpine AS builder
+FROM ${ALPINE_IMAGE} AS builder
 ARG NGINX_VERSION
 
 RUN apk add --no-cache \
@@ -11,7 +13,6 @@ WORKDIR /usr/src
 RUN curl -fsSL https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz | tar xzf - 
 
 WORKDIR /usr/src/nginx-${NGINX_VERSION}
-
 RUN git clone --depth=1 https://github.com/nginx/njs.git \
     && git clone --depth=1 https://github.com/leev/ngx_http_geoip2_module.git \
     && mkdir -p /tmp/modules-export
@@ -26,7 +27,7 @@ RUN ./configure \
     && strip objs/*.so \
     && cp objs/*.so /tmp/modules-export/
 
-FROM zzwsec/nginx:${NGINX_VERSION}
+FROM ${NGINX_IMAGE}
 
-RUN apk add --no-cache gd libmaxminddb libxml2 libxslt
+RUN apk add --no-cache libgd libmaxminddb-libs libxml2 libxslt
 COPY --from=builder /tmp/modules-export/ /usr/lib/nginx/modules/
