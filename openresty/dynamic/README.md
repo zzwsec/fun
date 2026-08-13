@@ -23,23 +23,36 @@
 在仓库根目录执行：
 
 ```shell
-docker build \
-    --build-arg OPENRESTY_IMAGE=zzwsec/openresty:1.31.1-alpine \
-    --tag zzwsec/openresty:1.31.1-alpine-dynamic \
-    openresty/dynamic
+docker build -t zzwsec/openresty:1.31.1.1-dynamic openresty/dynamic
 ```
 
-默认构建结果以 `OPENRESTY_IMAGE` 为运行阶段基础镜像，并包含全部动态模块及其运行依赖。
+构建前应先构建或拉取 `zzwsec/openresty:1.31.1.1`。默认构建结果以该镜像为运行阶段基础镜像，并包含全部动态模块及其运行依赖。使用其他基础镜像时，必须同步覆盖 OpenResty、NGINX、OpenSSL 和 PCRE2 版本参数。
 
 主要构建参数：
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `ALPINE_IMAGE` | `alpine:3.24.1` | 动态模块构建阶段的 Alpine 基础镜像 |
-| `OPENRESTY_IMAGE` | `zzwsec/openresty:1.31.1-alpine` | 最终运行阶段的基础镜像 |
+| `OPENRESTY_IMAGE` | `zzwsec/openresty:1.31.1.1` | 最终运行阶段的基础镜像 |
 | `RESTY_VERSION` | `1.31.1.1` | OpenResty 源码版本 |
 | `NGINX_VERSION` | `1.31.1` | OpenResty bundle 中的 NGINX 源码版本 |
+| `RESTY_OPENSSL_VERSION` | `3.5.7` | 与基础镜像保持一致的 OpenSSL 源码版本 |
+| `RESTY_OPENSSL_PATCH_VERSION` | `3.5.5` | 应用于 OpenSSL 的 OpenResty 补丁版本 |
+| `RESTY_PCRE_VERSION` | `10.47` | 与基础镜像保持一致的 PCRE2 源码版本 |
 | `RESTY_J` | 空 | 并行编译任务数；空值使用 `nproc` |
+
+模块源码参数：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `GEOIP2_REPO` / `GEOIP2_REF` | `https://github.com/leev/ngx_http_geoip2_module.git` / `3.4` | GeoIP2 源码和版本 |
+| `OTEL_REPO` / `OTEL_REF` | `https://github.com/nginx/nginx-otel.git` / `v0.1.2` | OpenTelemetry 源码和版本 |
+| `CACHE_PURGE_REPO` / `CACHE_PURGE_REF` | `https://github.com/nginx-modules/ngx_cache_purge.git` / `3.0.2` | cache-purge 源码和版本 |
+| `FANCYINDEX_REPO` / `FANCYINDEX_REF` | `https://github.com/aperezdc/ngx-fancyindex.git` / `v0.6.0` | fancyindex 源码和版本 |
+
+`RESTY_CONFIG_OPTIONS` 和 `RESTY_PCRE_OPTIONS` 也可通过 `--build-arg` 整体覆盖。动态模块的 NGINX 核心功能参数必须与基础镜像保持一致。
+
+运行阶段在基础镜像上额外安装 `c-ares`、`libmaxminddb-libs` 和 `libstdc++`。OpenTelemetry 模块通过基础镜像的私有 OpenSSL 共享库运行。
 
 ## 启用模块
 
@@ -56,7 +69,10 @@ load_module /usr/lib/openresty/modules/ngx_http_fancyindex_module.so;
 检查配置：
 
 ```shell
-openresty -t
+docker run --rm \
+    zzwsec/openresty:1.31.1.1-dynamic \
+    openresty -t \
+    -g 'load_module /usr/lib/openresty/modules/ngx_otel_module.so;'
 ```
 
 ## GeoIP2
@@ -161,7 +177,7 @@ http {
 
 动态模块必须与运行时 OpenResty/NGINX ABI 兼容。`--with-compat` 不能替代 NGINX 版本匹配。
 
-升级基础镜像后，必须同步更新 `RESTY_VERSION` 和 `NGINX_VERSION`，重新构建全部动态模块，并执行以下检查：
+升级基础镜像后，必须同步更新 `RESTY_VERSION`、`NGINX_VERSION`、`RESTY_OPENSSL_VERSION`、`RESTY_OPENSSL_PATCH_VERSION` 和 `RESTY_PCRE_VERSION`，重新构建全部动态模块，并执行以下检查：
 
 ```shell
 openresty -V
