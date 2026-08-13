@@ -15,7 +15,7 @@
 模块安装目录：
 
 ```text
-/usr/local/openresty/nginx/modules/
+/usr/lib/openresty/modules/
 ```
 
 ## 构建
@@ -35,21 +35,22 @@ docker build \
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
+| `ALPINE_IMAGE` | `alpine:3.24.1` | 动态模块构建阶段的 Alpine 基础镜像 |
 | `OPENRESTY_IMAGE` | `zzwsec/openresty:1.31.1-alpine` | 最终运行阶段的基础镜像 |
 | `RESTY_VERSION` | `1.31.1.1` | OpenResty 源码版本 |
 | `NGINX_VERSION` | `1.31.1` | OpenResty bundle 中的 NGINX 源码版本 |
-| `BUILD_JOBS` | 空 | 并行编译任务数；空值使用 `nproc` |
+| `RESTY_J` | 空 | 并行编译任务数；空值使用 `nproc` |
 
 ## 启用模块
 
 `load_module` 必须位于 `nginx.conf` 主配置上下文，并置于 `events`、`http` 和 `stream` 配置块之前。模块可按需加载，无须全部启用。
 
 ```nginx
-load_module modules/ngx_http_geoip2_module.so;
-load_module modules/ngx_stream_geoip2_module.so;
-load_module modules/ngx_otel_module.so;
-load_module modules/ngx_http_cache_purge_module.so;
-load_module modules/ngx_http_fancyindex_module.so;
+load_module /usr/lib/openresty/modules/ngx_http_geoip2_module.so;
+load_module /usr/lib/openresty/modules/ngx_stream_geoip2_module.so;
+load_module /usr/lib/openresty/modules/ngx_otel_module.so;
+load_module /usr/lib/openresty/modules/ngx_http_cache_purge_module.so;
+load_module /usr/lib/openresty/modules/ngx_http_fancyindex_module.so;
 ```
 
 检查配置：
@@ -89,7 +90,7 @@ stream {
     }
 
     log_format geoip '$remote_addr $geoip2_stream_country_code';
-    access_log logs/stream-access.log geoip;
+    access_log /var/log/openresty/stream-access.log geoip;
 }
 ```
 
@@ -121,7 +122,7 @@ http {
 
 ```nginx
 http {
-    proxy_cache_path /var/cache/nginx
+    proxy_cache_path /var/cache/openresty/proxy_cache
         levels=1:2
         keys_zone=content_cache:10m;
 
