@@ -222,7 +222,6 @@ RUN RESTY_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && make -j"${RESTY_BUILD_JOBS}" \
     && make -j"${RESTY_BUILD_JOBS}" install
 
-# libpcre2-posix is intentionally retained.
 RUN rm -rf \
         /usr/lib/openresty/openssl3/bin/c_rehash \
         /usr/lib/openresty/openssl3/lib/cmake \
@@ -308,7 +307,7 @@ ENV RESTY_VERSION="${RESTY_VERSION}" \
 COPY --from=builder /tmp/export/ /
 
 # apk-tools in the Alpine base image already depends on ca-certificates-bundle and zlib.
-RUN apk add --no-cache libgcc tzdata zlib \
+RUN apk add --no-cache libgcc tzdata \
     && addgroup -S -g "${RESTY_GID}" "${RESTY_USER}" \
     && adduser -S -D -H \
         -u "${RESTY_UID}" \

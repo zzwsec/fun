@@ -1,19 +1,17 @@
 # syntax=docker/dockerfile:1
 
+# Dynamic modules layered on the OpenResty base image.
+
 ARG ALPINE_IMAGE="alpine:3.24.1"
-ARG OPENRESTY_IMAGE="zzwsec/openresty:1.31.1.1"
+ARG OPENRESTY_IMAGE="openresty"
 ARG RESTY_VERSION="1.31.1.1"
-ARG NGINX_VERSION="1.31.1"
 ARG RESTY_OPENSSL_VERSION="3.5.7"
-ARG RESTY_OPENSSL_PATCH_VERSION="3.5.5"
 ARG RESTY_PCRE_VERSION="10.47"
 
 FROM ${ALPINE_IMAGE} AS modules-builder
 
 ARG RESTY_VERSION
-ARG NGINX_VERSION
 ARG RESTY_OPENSSL_VERSION
-ARG RESTY_OPENSSL_PATCH_VERSION
 ARG RESTY_PCRE_VERSION
 ARG RESTY_J=""
 
@@ -92,7 +90,7 @@ ARG _RESTY_CONFIG_DEPS="\
     "
 
 ENV OPENRESTY_SOURCE_DIR="/usr/src/openresty-${RESTY_VERSION}" \
-    NGINX_SOURCE_DIR="/usr/src/openresty-${RESTY_VERSION}/bundle/nginx-${NGINX_VERSION}" \
+    NGINX_SOURCE_DIR="/usr/src/openresty-nginx-source" \
     OPENSSL_SOURCE_DIR="/usr/src/openssl-${RESTY_OPENSSL_VERSION}" \
     PCRE_SOURCE_DIR="/usr/src/pcre2-${RESTY_PCRE_VERSION}"
 
@@ -100,10 +98,15 @@ RUN apk add --no-cache build-base c-ares-dev cmake curl git \
     libmaxminddb-dev linux-headers perl-dev zlib-dev
 
 WORKDIR /usr/src
+# OpenResty bundles exactly one NGINX source tree. Use a stable link so its
+# version does not need to be derived from RESTY_VERSION or passed separately.
 RUN curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${RESTY_OPENSSL_VERSION}/openssl-${RESTY_OPENSSL_VERSION}.tar.gz" | tar xzf - -C /usr/src \
-    && curl -fsSL "https://raw.githubusercontent.com/openresty/openresty/master/patches/openssl-${RESTY_OPENSSL_PATCH_VERSION}-sess_set_get_cb_yield.patch" | patch -d "${OPENSSL_SOURCE_DIR}" -p1 \
     && curl -fsSL "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${RESTY_PCRE_VERSION}/pcre2-${RESTY_PCRE_VERSION}.tar.gz" | tar xzf - -C /usr/src \
     && curl -fsSL "https://openresty.org/download/openresty-${RESTY_VERSION}.tar.gz" | tar xzf - -C /usr/src \
+    && nginx_source_dir="$(find "${OPENRESTY_SOURCE_DIR}/bundle" -maxdepth 1 -type d -name 'nginx-*')" \
+    && [ -n "${nginx_source_dir}" ] \
+    && [ "$(printf '%s\n' "${nginx_source_dir}" | wc -l)" -eq 1 ] \
+    && ln -s "${nginx_source_dir}" "${NGINX_SOURCE_DIR}" \
     && git clone --depth=1 --branch "${GEOIP2_REF}" "${GEOIP2_REPO}" /usr/src/ngx_http_geoip2_module \
     && git clone --depth=1 --branch "${OTEL_REF}" "${OTEL_REPO}" /usr/src/nginx-otel \
     && git clone --depth=1 --branch "${CACHE_PURGE_REF}" "${CACHE_PURGE_REPO}" /usr/src/ngx_cache_purge \
@@ -169,7 +172,7 @@ RUN MODULE_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && cp /usr/src/nginx-otel/build/ngx_otel_module.so /usr/lib/openresty/modules/ \
     && strip --strip-unneeded /usr/lib/openresty/modules/*.so
 
-FROM ${OPENRESTY_IMAGE}
+FROM ${OPENRESTY_IMAGE}:${RESTY_VERSION}
 
 COPY --from=modules-builder /usr/lib/openresty/modules/ /usr/lib/openresty/modules/
 
