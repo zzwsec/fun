@@ -198,6 +198,12 @@ display_errors = Off
 display_startup_errors = Off
 allow_url_fopen = Off
 allow_url_include = Off
+
+; Session security
+session.use_strict_mode = 1
+session.use_only_cookies = 1
+session.cookie_httponly = 1
+session.cookie_samesite = Lax
 INNER_EOF
 
 cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/30-timezone.ini"
@@ -216,8 +222,7 @@ EOF
 
 RUN php --version \
     && php --ini \
-    && php -m \
-    && php-fpm -t
+    && php -m
 
 FROM alpine:3.24
 
