@@ -65,10 +65,11 @@ RUN set -eux \
         --with-stream_realip_module \
         --with-stream_ssl_module \
         --with-stream_ssl_preread_module \
-        --with-cc-opt="-Os -g -fstack-clash-protection -Wformat -Werror=format-security -fno-plt" \
+        --with-cc-opt="-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt" \
         --with-ld-opt="-Wl,--as-needed,-O1,--sort-common -Wl,-z,pack-relative-relocs" \
     && make -j"$(nproc)" \
     && make install \
+    && strip --strip-unneeded /usr/sbin/nginx \
     && mkdir -p /etc/nginx/conf.d /usr/lib/nginx/modules /usr/share/nginx/html /var/cache/nginx /var/log/nginx \
     && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.conf" /etc/nginx/nginx.conf \
     && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.default.conf" /etc/nginx/conf.d/default.conf \
