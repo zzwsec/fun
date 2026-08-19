@@ -95,7 +95,7 @@ RUN set -eux \
     && nginx -V \
     && nginx -t
 
-EXPOSE 80/tcp 443/tcp 443/udp
+EXPOSE 80
 STOPSIGNAL SIGQUIT
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

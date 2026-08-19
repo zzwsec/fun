@@ -2,6 +2,8 @@
 
 该目录使用 Alpine 多阶段构建 NGINX，并将 ModSecurity v3、ModSecurity-nginx、OWASP Core Rule Set（CRS）和 WordPress 规则排除插件静态编译或打包进运行时镜像。
 
+**Brotli 说明：** ModSecurity 依赖的 Alpine `libcurl` 会动态链接 `libbrotlidec.so.1`，因此运行时镜像仍需保留 `brotli-libs`，仅将 `ngx_brotli` 静态编译无法消除该依赖。
+
 镜像包含 WAF 能力和规则文件，但 **默认 NGINX 配置不会自动启用 ModSecurity**。启用 WAF 时需要配置 `modsecurity on` 和 `modsecurity_rules_file`。
 
 ## 包含组件

@@ -156,6 +156,7 @@ RUN curl -fsSL "${RESTY_OPENSSL_URL_BASE}/openssl-${RESTY_OPENSSL_VERSION}.tar.g
     && curl -fsSL "https://openresty.org/download/openresty-${RESTY_VERSION}.tar.gz" | tar xzf - -C /usr/src \
     && git clone --depth=1 --branch "${RESTY_VERSION}-0" "${DOCKER_OPENRESTY_REPO}" "${DOCKER_OPENRESTY_SOURCE_DIR}" \
     && git clone --depth=1 --recurse-submodules --shallow-submodules --jobs="$(nproc)" "${NGX_BROTLI_REPO}" "${OPENRESTY_SOURCE_DIR}/ngx_brotli" \
+    && curl -fsSL https://salsa.debian.org/nginx-team/libnginx-mod-http-brotli/raw/debian/latest/debian/patches/0001-Fix-Vary-header.patch | patch -d "${OPENRESTY_SOURCE_DIR}/ngx_brotli" -p1 \
     && git clone --depth=1 "${NGX_ZSTD_REPO}" "${OPENRESTY_SOURCE_DIR}/ngx_zstd" \
     && git clone --depth=1 "${NGX_ACME_REPO}" "${OPENRESTY_SOURCE_DIR}/ngx_http_acme_module"
 

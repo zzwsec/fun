@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG ALPINE_IMAGE="alpine:3.24.1"
+ARG ALPINE_IMAGE="alpine:3.24"
 
 FROM ${ALPINE_IMAGE} AS builder
 
@@ -12,8 +12,8 @@ ENV NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
     NGX_ACME_STATE_PREFIX="/var/cache/nginx" \
     RUSTFLAGS="-Ctarget-feature=-crt-static"
 
-RUN apk add --no-cache autoconf automake brotli-dev \
-    build-base cargo clang clang-dev curl curl-dev git libtool \
+RUN apk add --no-cache autoconf automake \
+    build-base cargo clang clang-dev cmake curl curl-dev git libtool \
     linux-headers openssl-dev pcre2-dev pkgconfig wget zlib-dev zstd-dev zstd-static
 
 WORKDIR /usr/src
@@ -24,6 +24,19 @@ RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar 
     && git clone --depth=1 https://github.com/tokers/zstd-nginx-module.git "${NGINX_SOURCE_DIR}/ngx_zstd" \
     && git clone --depth=1 https://github.com/nginx/nginx-acme.git "${NGINX_SOURCE_DIR}/ngx_http_acme_module" \
     && git clone --depth=1 --recurse-submodules --shallow-submodules --jobs="$(nproc)" https://github.com/google/ngx_brotli.git "${NGINX_SOURCE_DIR}/ngx_brotli"
+
+WORKDIR ${NGINX_SOURCE_DIR}/ngx_brotli/deps/brotli
+RUN curl -fsSL https://salsa.debian.org/nginx-team/libnginx-mod-http-brotli/raw/debian/latest/debian/patches/0001-Fix-Vary-header.patch | \
+        patch -d "${NGINX_SOURCE_DIR}/ngx_brotli" -p1 \
+    && cmake -S . -B out \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBROTLI_DISABLE_TESTS=ON \
+        -DCMAKE_C_FLAGS="-Ofast -flto -funroll-loops -ffunction-sections -fdata-sections" \
+    && cmake --build out \
+        --config Release \
+        --target brotlienc \
+        --parallel "$(nproc)"
 
 WORKDIR ${NGINX_SOURCE_DIR}
 RUN ./configure \
@@ -80,7 +93,7 @@ FROM ${ALPINE_IMAGE}
 
 COPY --from=builder /tmp/export/ /
 RUN set -x \
-    && apk add --no-cache brotli-libs ca-certificates gettext-envsubst libcrypto3 libgcc libssl3 pcre2 tzdata zlib \
+    && apk add --no-cache gettext-envsubst libcrypto3 libgcc libssl3 pcre2 tzdata \
     && addgroup -g 101 -S nginx \
     && adduser -S -D -H -u 101 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx \
     && ln -sf /usr/lib/nginx/modules /etc/nginx/modules \

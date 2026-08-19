@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG ALPINE_IMAGE="alpine:3.24.1"
+ARG ALPINE_IMAGE="alpine:3.24"
 
 FROM ${ALPINE_IMAGE} AS builder
 
