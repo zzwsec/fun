@@ -2,7 +2,7 @@
 
 FROM alpine:3.24
 
-ARG NGINX_VERSION="1.31.3"
+ARG NGINX_VERSION="1.31.5"
 
 RUN set -eux \
     && NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
@@ -44,6 +44,7 @@ RUN set -eux \
         --group=nginx \
         --with-debug \
         --with-compat \
+        --with-control-api \
         --with-file-aio \
         --with-threads \
         --without-select_module \
@@ -52,6 +53,7 @@ RUN set -eux \
         --with-http_auth_request_module \
         --with-http_gunzip_module \
         --with-http_gzip_static_module \
+        --with-http_json_module \
         --with-http_random_index_module \
         --with-http_realip_module \
         --with-http_secure_link_module \

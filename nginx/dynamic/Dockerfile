@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ARG ALPINE_IMAGE="alpine:3.24"
-ARG NGINX_VERSION="1.31.3"
+ARG NGINX_VERSION="1.31.5"
 ARG NGINX_IMAGE="zzwsec/nginx:${NGINX_VERSION}"
 
 FROM ${ALPINE_IMAGE} AS builder

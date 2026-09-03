@@ -4,10 +4,10 @@ ARG ALPINE_IMAGE="alpine:3.24"
 
 FROM ${ALPINE_IMAGE} AS builder
 
-ARG CORE_RULESET_VERSION="4.28.0"
+ARG CORE_RULESET_VERSION="4.29.0"
 ARG MODSECURITY_NGINX_VERSION="1.0.4"
 ARG MODSECURITY_VERSION="3.0.16"
-ARG NGINX_VERSION="1.31.3"
+ARG NGINX_VERSION="1.31.5"
 ARG WORDPRESS_RULE_EXCLUSIONS_VERSION="1.2.0"
 
 ENV CORE_RULESET_SOURCE_DIR="/usr/src/coreruleset" \
@@ -98,10 +98,10 @@ RUN sed -i \
     --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
     --user=nginx \
     --group=nginx \
-    --with-compat --with-file-aio --with-threads \
+    --with-compat --with-control-api --with-file-aio --with-threads \
     --without-select_module --without-poll_module \
     --with-http_addition_module --with-http_auth_request_module \
-    --with-http_gunzip_module --with-http_gzip_static_module \
+    --with-http_gunzip_module --with-http_gzip_static_module --with-http_json_module \
     --with-http_random_index_module --with-http_realip_module \
     --with-http_secure_link_module --with-http_slice_module --with-http_ssl_module \
     --with-http_stub_status_module --with-http_sub_module --with-http_v2_module --with-http_v3_module \

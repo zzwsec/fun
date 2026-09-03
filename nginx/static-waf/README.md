@@ -11,10 +11,10 @@
 | 组件 | 默认版本 | 用途 |
 |---|---:|---|
 | Alpine | 3.24.1 | 构建及运行时基础镜像 |
-| NGINX | 1.31.3 | Web 服务器和反向代理 |
+| NGINX | 1.31.5 | Web 服务器和反向代理 |
 | ModSecurity | 3.0.16 | WAF 引擎 |
 | ModSecurity-nginx | 1.0.4 | NGINX 与 ModSecurity 的连接器 |
-| OWASP CRS | 4.28.0 | 通用 Web 攻击检测规则 |
+| OWASP CRS | 4.29.0 | 通用 Web 攻击检测规则 |
 | WordPress Rule Exclusions | 1.2.0 | 降低 WordPress 常见请求的误报 |
 
 ## 构建
@@ -23,7 +23,7 @@
 
 ```shell
 docker build \
-    --tag zzwsec/nginx:1.31.3-waf \
+    --tag zzwsec/nginx:1.31.5-waf \
     nginx/static-waf
 ```
 
@@ -32,10 +32,10 @@ docker build \
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `ALPINE_IMAGE` | `alpine:3.24.1` | 构建阶段和运行阶段的基础镜像 |
-| `NGINX_VERSION` | `1.31.3` | NGINX 源码版本 |
+| `NGINX_VERSION` | `1.31.5` | NGINX 源码版本 |
 | `MODSECURITY_VERSION` | `3.0.16` | ModSecurity 源码版本 |
 | `MODSECURITY_NGINX_VERSION` | `1.0.4` | ModSecurity-nginx 版本 |
-| `CORE_RULESET_VERSION` | `4.28.0` | OWASP CRS 版本 |
+| `CORE_RULESET_VERSION` | `4.29.0` | OWASP CRS 版本 |
 | `WORDPRESS_RULE_EXCLUSIONS_VERSION` | `1.2.0` | WordPress 排除插件版本 |
 
 ## 启用 WAF
@@ -74,7 +74,7 @@ docker run --rm \
     --name nginx-waf \
     --publish 8080:80 \
     --mount type=bind,src="$PWD/default.conf",dst=/etc/nginx/conf.d/default.conf,readonly \
-    zzwsec/nginx:1.31.3-waf
+    zzwsec/nginx:1.31.5-waf
 ```
 
 示例中的 `app:8080` 表示后端容器的服务名和端口。通过该名称访问时，NGINX 和后端容器需要位于同一个 Docker 网络。
@@ -84,7 +84,7 @@ docker run --rm \
 ```shell
 docker run --rm \
     --mount type=bind,src="$PWD/default.conf",dst=/etc/nginx/conf.d/default.conf,readonly \
-    zzwsec/nginx:1.31.3-waf nginx -t
+    zzwsec/nginx:1.31.5-waf nginx -t
 ```
 
 ## WAF 文件布局
@@ -135,7 +135,7 @@ CRS 默认的入站和出站异常阈值分别为 `5` 和 `4`。CRS 中 critical
 `DetectionOnly` 模式执行规则检测和日志动作，但不执行规则中的阻断动作。先从镜像复制 `modsecurity.conf`：
 
 ```shell
-docker run --rm zzwsec/nginx:1.31.3-waf \
+docker run --rm zzwsec/nginx:1.31.5-waf \
     cat /etc/nginx/modsec/modsecurity.conf > modsecurity.conf
 ```
 
@@ -160,7 +160,7 @@ docker run --rm \
     --mount type=bind,src="$PWD/default.conf",dst=/etc/nginx/conf.d/default.conf,readonly \
     --mount type=bind,src="$PWD/modsecurity.conf",dst=/etc/nginx/modsec/modsecurity.conf,readonly \
     --mount type=bind,src="$PWD/anomaly-threshold-config.conf",dst=/etc/nginx/modsec/plugins/anomaly-threshold-config.conf,readonly \
-    zzwsec/nginx:1.31.3-waf
+    zzwsec/nginx:1.31.5-waf
 ```
 
 规则命中信息包含规则 ID、匹配变量和请求信息，可作为编写规则排除项的依据。

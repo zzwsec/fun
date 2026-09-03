@@ -7,7 +7,7 @@ on:
         description: nginx source version to build
         required: true
         type: string
-        default: "1.31.3"
+        default: "1.31.5"
 
 env:
   IMAGE_NAME: nginx
