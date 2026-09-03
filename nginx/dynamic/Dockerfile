@@ -8,17 +8,15 @@ FROM ${ALPINE_IMAGE} AS builder
 ARG NGINX_VERSION
 
 RUN apk add --no-cache \
-    build-base pcre2-dev zlib-dev openssl-dev linux-headers git curl \
-    gd-dev libmaxminddb-dev libxml2-dev libxslt-dev
+    build-base curl gd-dev git libmaxminddb-dev libxml2-dev \
+    libxslt-dev openssl-dev pcre2-dev zlib-dev
 
 WORKDIR /usr/src
-RUN curl -fsSL https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz | tar xzf - 
+RUN curl -fsSL https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz | tar xzf - \
+    && git clone --depth=1 https://github.com/nginx/njs.git nginx-${NGINX_VERSION}/njs \
+    && git clone --depth=1 https://github.com/leev/ngx_http_geoip2_module.git nginx-${NGINX_VERSION}/ngx_http_geoip2_module
 
 WORKDIR /usr/src/nginx-${NGINX_VERSION}
-RUN git clone --depth=1 https://github.com/nginx/njs.git \
-    && git clone --depth=1 https://github.com/leev/ngx_http_geoip2_module.git \
-    && mkdir -p /tmp/modules-export
-
 RUN ./configure \
     --with-compat \
     --with-stream \
@@ -27,9 +25,10 @@ RUN ./configure \
     --add-dynamic-module=ngx_http_geoip2_module \
     && make modules \
     && strip objs/*.so \
-    && cp objs/*.so /tmp/modules-export/
+    && mkdir -p /usr/lib/nginx/modules \
+    && cp objs/*.so /usr/lib/nginx/modules/
 
 FROM ${NGINX_IMAGE}
 
 RUN apk add --no-cache libgd libmaxminddb-libs libxml2 libxslt
-COPY --from=builder /tmp/modules-export/ /usr/lib/nginx/modules/
+COPY --from=builder /usr/lib/nginx/modules/ /usr/lib/nginx/modules/
