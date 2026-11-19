@@ -80,8 +80,7 @@ jobs:
       latest_version: ${{ steps.versions.outputs.latest_version }}
       image_name: ${{ steps.versions.outputs.image_name }}
       alpine_image: ${{ steps.versions.outputs.alpine_image }}
-      build_static: ${{ steps.versions.outputs.build_static }}
-      build_dynamic: ${{ steps.versions.outputs.build_dynamic }}
+      build_nginx: ${{ steps.versions.outputs.build_nginx }}
       build_waf: ${{ steps.versions.outputs.build_waf }}
 
     steps:
@@ -125,25 +124,22 @@ jobs:
           current_dynamic="${current_dynamic:-0.0.0}"
           current_waf="${current_waf:-0.0.0}"
 
-          # Each flavor is checked independently because a prior partial run may have published static while dynamic or WAF is still missing.
-          build_static=false
-          build_dynamic=false
+          # Rebuild both base variants when either published tag is behind.
+          build_nginx=false
           build_waf=false
           if [[ "${FORCE_BUILD}" == "true" ]]; then
-            build_static=true
-            build_dynamic=true
+            build_nginx=true
             build_waf=true
           else
-            [[ "$(printf '%s\n%s\n' "${current_static}" "${latest_version}" | sort -V | tail -n 1)" != "${current_static}" ]] && build_static=true
-            [[ "$(printf '%s\n%s\n' "${current_dynamic}" "${latest_version}" | sort -V | tail -n 1)" != "${current_dynamic}" ]] && build_dynamic=true
+            [[ "$(printf '%s\n%s\n' "${current_static}" "${latest_version}" | sort -V | tail -n 1)" != "${current_static}" ]] && build_nginx=true
+            [[ "$(printf '%s\n%s\n' "${current_dynamic}" "${latest_version}" | sort -V | tail -n 1)" != "${current_dynamic}" ]] && build_nginx=true
             [[ "$(printf '%s\n%s\n' "${current_waf}" "${latest_version}" | sort -V | tail -n 1)" != "${current_waf}" ]] && build_waf=true
           fi
 
           echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
           echo "image_name=${NGINX_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
           echo "alpine_image=${ALPINE_IMAGE}" >> "${GITHUB_OUTPUT}"
-          echo "build_static=${build_static}" >> "${GITHUB_OUTPUT}"
-          echo "build_dynamic=${build_dynamic}" >> "${GITHUB_OUTPUT}"
+          echo "build_nginx=${build_nginx}" >> "${GITHUB_OUTPUT}"
           echo "build_waf=${build_waf}" >> "${GITHUB_OUTPUT}"
 
           {
@@ -153,37 +149,18 @@ jobs:
             echo
             echo "| Image | Current | Build |"
             echo "| --- | --- | --- |"
-            echo "| static | ${current_static} | ${build_static} |"
-            echo "| dynamic | ${current_dynamic} | ${build_dynamic} |"
+            echo "| static | ${current_static} | ${build_nginx} |"
+            echo "| dynamic | ${current_dynamic} | ${build_nginx} |"
             echo "| waf | ${current_waf} | ${build_waf} |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   # Local reusable workflows are called from the same commit as this pipeline.
   # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
-  nginx_static:
-    name: Build nginx static ${{ needs.check_nginx.outputs.latest_version }}
+  nginx_build:
+    name: Build nginx static and dynamic ${{ needs.check_nginx.outputs.latest_version }}
     needs: check_nginx
-    if: needs.check_nginx.outputs.build_static == 'true'
-    uses: ./.github/workflows/nginx-static.yaml
-    with:
-      image_name: ${{ needs.check_nginx.outputs.image_name }}
-      nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
-      alpine_image: ${{ needs.check_nginx.outputs.alpine_image }}
-    secrets: inherit
-
-  nginx_dynamic:
-    name: Build nginx dynamic ${{ needs.check_nginx.outputs.latest_version }}
-    needs:
-      - check_nginx
-      - nginx_static
-    # always() evaluates this job even when static was skipped; failed static still blocks it.
-    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif
-    if: >
-      always() &&
-      needs.check_nginx.result == 'success' &&
-      (needs.nginx_static.result == 'success' || needs.nginx_static.result == 'skipped') &&
-      needs.check_nginx.outputs.build_dynamic == 'true'
-    uses: ./.github/workflows/nginx-dynamic.yaml
+    if: needs.check_nginx.outputs.build_nginx == 'true'
+    uses: ./.github/workflows/nginx-build.yaml
     with:
       image_name: ${{ needs.check_nginx.outputs.image_name }}
       nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
@@ -194,7 +171,7 @@ jobs:
     name: Build nginx waf ${{ needs.check_nginx.outputs.latest_version }}
     needs: check_nginx
     if: needs.check_nginx.outputs.build_waf == 'true'
-    uses: ./.github/workflows/nginx-static-waf.yaml
+    uses: ./.github/workflows/nginx-waf.yaml
     with:
       image_name: ${{ needs.check_nginx.outputs.image_name }}
       nginx_version: ${{ needs.check_nginx.outputs.latest_version }}

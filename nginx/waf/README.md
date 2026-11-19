@@ -24,7 +24,7 @@
 ```shell
 docker build \
     --tag zzwsec/nginx:1.31.9-waf \
-    nginx/static-waf
+    nginx/waf
 ```
 
 主要构建参数：

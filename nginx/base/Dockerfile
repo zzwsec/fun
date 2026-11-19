@@ -13,18 +13,19 @@ ENV NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
     RUSTFLAGS="-Ctarget-feature=-crt-static"
 
 RUN apk add --no-cache \
-    build-base cargo clang clang-dev cmake curl git libmaxminddb-dev libmaxminddb-static \
-    linux-headers openssl-dev pcre2-dev pcre2-static pkgconfig \
+    build-base cargo clang clang-dev cmake curl gd-dev git libmaxminddb-dev libmaxminddb-static \
+    libxml2-dev libxslt-dev linux-headers openssl-dev pcre2-dev pcre2-static pkgconfig \
     zlib-dev zlib-static zstd-dev zstd-static
 
 WORKDIR /usr/src
 RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz --no-same-owner -C /usr/src \
     && git clone --depth=1 https://github.com/nginx/docker-nginx.git \
-    && git clone --depth=1 --branch "${NGINX_VERSION}-1" https://github.com/nginx/pkg-oss.git \
     && git clone --depth=1 https://github.com/openresty/headers-more-nginx-module.git "${NGINX_SOURCE_DIR}/ngx_headers_more" \
     && git clone --depth=1 https://github.com/tokers/zstd-nginx-module.git "${NGINX_SOURCE_DIR}/ngx_zstd" \
     && git clone --depth=1 https://github.com/nginx/nginx-acme.git "${NGINX_SOURCE_DIR}/ngx_http_acme_module" \
-    && git clone --depth=1 --recurse-submodules --shallow-submodules --jobs="$(nproc)" https://github.com/google/ngx_brotli.git "${NGINX_SOURCE_DIR}/ngx_brotli"
+    && git clone --depth=1 https://github.com/nginx/njs.git "${NGINX_SOURCE_DIR}/njs" \
+    && git clone --depth=1 --recurse-submodules --shallow-submodules --jobs="$(nproc)" https://github.com/google/ngx_brotli.git "${NGINX_SOURCE_DIR}/ngx_brotli" \
+    && git clone --depth=1 --branch "${NGINX_VERSION}-1" https://github.com/nginx/pkg-oss.git
 
 WORKDIR ${NGINX_SOURCE_DIR}/ngx_brotli/deps/brotli
 RUN curl -fsSL https://salsa.debian.org/nginx-team/libnginx-mod-http-brotli/raw/debian/latest/debian/patches/0001-Fix-Vary-header.patch | \
@@ -40,7 +41,8 @@ RUN curl -fsSL https://salsa.debian.org/nginx-team/libnginx-mod-http-brotli/raw/
         --parallel "$(nproc)"
 
 WORKDIR ${NGINX_SOURCE_DIR}
-RUN ./configure \
+# Dynamic modules resolve PCRE2 and zlib symbols from the nginx executable.
+RUN CORE_LIBS='-l:libmaxminddb.a -Wl,--whole-archive -l:libpcre2-8.a -l:libz.a -Wl,--no-whole-archive' ./configure \
     --prefix=/etc/nginx \
     --sbin-path=/usr/sbin/nginx \
     --modules-path=/usr/lib/nginx/modules \
@@ -60,25 +62,27 @@ RUN ./configure \
     --without-select_module --without-poll_module \
     --with-http_addition_module --with-http_auth_request_module --with-http_geoip_module \
     --with-http_gunzip_module --with-http_gzip_static_module --with-http_json_module \
+    --with-http_image_filter_module=dynamic \
     --with-http_random_index_module --with-http_realip_module \
     --with-http_secure_link_module --with-http_slice_module --with-http_ssl_module \
     --with-http_stub_status_module --with-http_sub_module --with-http_v2_module --with-http_v3_module \
     --with-stream --with-stream_geoip_module --with-stream_realip_module \
     --with-stream_ssl_module --with-stream_ssl_preread_module \
-    --with-cc-opt='-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt -g' \
-    --with-ld-opt="-static-libgcc \
-        -Wl,--as-needed,-O1,--sort-common,-z,pack-relative-relocs \
-        -Wl,--exclude-libs,libgcc.a:libgcc_eh.a:libmaxminddb.a:libpcre2-8.a:libz.a \
-        -l:libmaxminddb.a -l:libpcre2-8.a -l:libz.a" \
+    --with-cc-opt='-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt' \
+    --with-ld-opt='-static-libgcc \
+        -Wl,--exclude-libs,libgcc.a:libgcc_eh.a:libmaxminddb.a \
+        -Wl,--as-needed,-O1,--sort-common,-z,pack-relative-relocs' \
     --add-module=ngx_headers_more \
     --add-module=ngx_zstd \
     --add-module=ngx_http_acme_module \
     --add-module=ngx_brotli \
+    --add-dynamic-module=njs/nginx \
     && make -j"$(nproc)" \
-    && strip objs/nginx
+    && strip objs/nginx objs/*.so
 
-RUN mkdir -p /etc/nginx/conf.d /usr/share/nginx /usr/sbin /docker-entrypoint.d \
+RUN mkdir -p /etc/nginx/conf.d /usr/share/nginx /usr/sbin /usr/lib/nginx/modules /docker-entrypoint.d \
     && cp -a "${NGINX_SOURCE_DIR}/objs/nginx" /usr/sbin/nginx \
+    && cp -a "${NGINX_SOURCE_DIR}"/objs/*.so /usr/lib/nginx/modules/ \
     && cp -a "${NGINX_SOURCE_DIR}/html" /usr/share/nginx/ \
     && cp -a "${NGINX_SOURCE_DIR}/conf/." /etc/nginx/ \
     && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.conf" /etc/nginx/nginx.conf \
@@ -87,7 +91,7 @@ RUN mkdir -p /etc/nginx/conf.d /usr/share/nginx /usr/sbin /docker-entrypoint.d \
     && cp -a "${DOCKER_NGINX_ENTRYPOINT_DIR}/." /docker-entrypoint.d/ \
     && mv /docker-entrypoint.d/docker-entrypoint.sh /docker-entrypoint.sh
 
-FROM ${ALPINE_IMAGE}
+FROM ${ALPINE_IMAGE} AS static
 
 COPY --from=builder /etc/nginx/ /etc/nginx/
 COPY --from=builder /usr/share/nginx/ /usr/share/nginx/
@@ -109,3 +113,8 @@ EXPOSE 80/tcp 443/tcp 443/udp
 STOPSIGNAL SIGQUIT
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
+
+FROM static AS dynamic
+
+RUN apk add --no-cache libgd libxml2
+COPY --from=builder /usr/lib/nginx/modules/*.so /usr/lib/nginx/modules/
