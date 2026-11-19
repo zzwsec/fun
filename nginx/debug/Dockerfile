@@ -2,27 +2,18 @@
 
 FROM alpine:3.24
 
-ARG NGINX_VERSION="1.31.5"
+ARG NGINX_VERSION="1.31.9"
 
 RUN set -eux \
     && NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
     && DOCKER_NGINX_ENTRYPOINT_DIR="/usr/src/docker-nginx/entrypoint" \
     && PKG_OSS_ALPINE_CONFIG_DIR="/usr/src/pkg-oss/alpine/alpine" \
-    && apk add --no-cache \
-        ca-certificates \
-        gettext-envsubst \
-        tzdata \
+    && apk add --no-cache ca-certificates gettext-envsubst tzdata \
     && apk add --no-cache --virtual .build-deps \
-        build-base \
-        curl \
-        git \
-        linux-headers \
-        openssl-dev \
-        pax-utils \
-        pcre2-dev \
-        zlib-dev \
+        build-base curl git libmaxminddb-dev libmaxminddb-static linux-headers \
+        openssl-dev pax-utils pcre2-dev pcre2-static zlib-dev zlib-static \
     && mkdir -p /usr/src \
-    && curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xzf - -C /usr/src \
+    && curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz --no-same-owner -C /usr/src \
     && git clone --depth=1 https://github.com/nginx/docker-nginx.git /usr/src/docker-nginx \
     && git clone --depth=1 https://github.com/nginx/pkg-oss.git /usr/src/pkg-oss \
     && cd "${NGINX_SOURCE_DIR}" \
@@ -40,44 +31,30 @@ RUN set -eux \
         --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
         --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
         --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
-        --user=nginx \
-        --group=nginx \
-        --with-debug \
-        --with-compat \
-        --with-control-api \
-        --with-file-aio \
-        --with-threads \
-        --without-select_module \
-        --without-poll_module \
-        --with-http_addition_module \
-        --with-http_auth_request_module \
-        --with-http_gunzip_module \
-        --with-http_gzip_static_module \
-        --with-http_json_module \
-        --with-http_random_index_module \
-        --with-http_realip_module \
-        --with-http_secure_link_module \
-        --with-http_slice_module \
-        --with-http_ssl_module \
-        --with-http_stub_status_module \
-        --with-http_sub_module \
-        --with-http_v2_module \
-        --with-http_v3_module \
-        --with-stream \
-        --with-stream_realip_module \
-        --with-stream_ssl_module \
-        --with-stream_ssl_preread_module \
+        --user=nginx --group=nginx \
+        --with-debug --with-compat --with-control-api --with-file-aio --with-threads \
+        --without-select_module --without-poll_module \
+        --with-http_addition_module --with-http_auth_request_module --with-http_geoip_module \
+        --with-http_gunzip_module --with-http_gzip_static_module --with-http_json_module \
+        --with-http_random_index_module --with-http_realip_module \
+        --with-http_secure_link_module --with-http_slice_module --with-http_ssl_module \
+        --with-http_stub_status_module --with-http_sub_module --with-http_v2_module --with-http_v3_module \
+        --with-stream --with-stream_geoip_module --with-stream_realip_module \
+        --with-stream_ssl_module --with-stream_ssl_preread_module \
         --with-cc-opt="-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt" \
-        --with-ld-opt="-Wl,--as-needed,-O1,--sort-common -Wl,-z,pack-relative-relocs" \
+        --with-ld-opt="-static-libgcc \
+            -Wl,--as-needed,-O1,--sort-common,-z,pack-relative-relocs \
+            -Wl,--exclude-libs,libgcc.a:libgcc_eh.a:libmaxminddb.a:libpcre2-8.a:libz.a \
+            -l:libmaxminddb.a -l:libpcre2-8.a -l:libz.a" \
     && make -j"$(nproc)" \
     && make install \
     && strip --strip-unneeded /usr/sbin/nginx \
-    && mkdir -p /etc/nginx/conf.d /usr/lib/nginx/modules /usr/share/nginx/html /var/cache/nginx /var/log/nginx \
+    && mkdir -p /etc/nginx/conf.d /usr/lib/nginx/modules /usr/share/nginx /var/cache/nginx \
     && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.conf" /etc/nginx/nginx.conf \
     && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.default.conf" /etc/nginx/conf.d/default.conf \
     && sed -i 's#notice#debug#' /etc/nginx/nginx.conf \
-    && cp -a "${NGINX_SOURCE_DIR}/html/." /usr/share/nginx/html/ \
-    && rm -rf /etc/nginx/html /etc/nginx/*.default /etc/nginx/koi-* /etc/nginx/win-utf \
+    && mv /etc/nginx/html /usr/share/nginx/ \
+    && rm -f /etc/nginx/*.default /etc/nginx/koi-* /etc/nginx/win-utf \
     && mv "${DOCKER_NGINX_ENTRYPOINT_DIR}/docker-entrypoint.sh" /docker-entrypoint.sh \
     && mv "${DOCKER_NGINX_ENTRYPOINT_DIR}" /docker-entrypoint.d \
     && addgroup -g 101 -S nginx \

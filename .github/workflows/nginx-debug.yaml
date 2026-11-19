@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       nginx_version:
-        description: nginx source version to build
+        description: nginx source version to build (1.31.7 or newer)
         required: true
         type: string
-        default: "1.31.5"
+        default: "1.31.9"
 
 env:
   IMAGE_NAME: nginx

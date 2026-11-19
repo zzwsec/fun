@@ -4,7 +4,7 @@ ARG ALPINE_IMAGE="alpine:3.24"
 
 FROM ${ALPINE_IMAGE} AS builder
 
-ARG NGINX_VERSION="1.31.5"
+ARG NGINX_VERSION="1.31.9"
 
 ENV NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
     DOCKER_NGINX_ENTRYPOINT_DIR="/usr/src/docker-nginx/entrypoint" \
@@ -12,12 +12,13 @@ ENV NGINX_SOURCE_DIR="/usr/src/nginx-${NGINX_VERSION}" \
     NGX_ACME_STATE_PREFIX="/var/cache/nginx" \
     RUSTFLAGS="-Ctarget-feature=-crt-static"
 
-RUN apk add --no-cache autoconf automake \
-    build-base cargo clang clang-dev cmake curl curl-dev git libtool \
-    linux-headers openssl-dev pcre2-dev pkgconfig wget zlib-dev zstd-dev zstd-static
+RUN apk add --no-cache \
+    build-base cargo clang clang-dev cmake curl git libmaxminddb-dev libmaxminddb-static \
+    linux-headers openssl-dev pcre2-dev pcre2-static pkgconfig \
+    zlib-dev zlib-static zstd-dev zstd-static
 
 WORKDIR /usr/src
-RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xzf - -C /usr/src \
+RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" | tar xz --no-same-owner -C /usr/src \
     && git clone --depth=1 https://github.com/nginx/docker-nginx.git \
     && git clone --depth=1 --branch "${NGINX_VERSION}-1" https://github.com/nginx/pkg-oss.git \
     && git clone --depth=1 https://github.com/openresty/headers-more-nginx-module.git "${NGINX_SOURCE_DIR}/ngx_headers_more" \
@@ -57,48 +58,52 @@ RUN ./configure \
     --group=nginx \
     --with-compat --with-control-api --with-file-aio --with-threads \
     --without-select_module --without-poll_module \
-    --with-http_addition_module --with-http_auth_request_module \
+    --with-http_addition_module --with-http_auth_request_module --with-http_geoip_module \
     --with-http_gunzip_module --with-http_gzip_static_module --with-http_json_module \
     --with-http_random_index_module --with-http_realip_module \
     --with-http_secure_link_module --with-http_slice_module --with-http_ssl_module \
     --with-http_stub_status_module --with-http_sub_module --with-http_v2_module --with-http_v3_module \
-    --with-stream --with-stream_realip_module --with-stream_ssl_module --with-stream_ssl_preread_module \
+    --with-stream --with-stream_geoip_module --with-stream_realip_module \
+    --with-stream_ssl_module --with-stream_ssl_preread_module \
     --with-cc-opt='-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt -g' \
-    --with-ld-opt='-Wl,--as-needed,-O1,--sort-common -Wl,-z,pack-relative-relocs' \
+    --with-ld-opt="-static-libgcc \
+        -Wl,--as-needed,-O1,--sort-common,-z,pack-relative-relocs \
+        -Wl,--exclude-libs,libgcc.a:libgcc_eh.a:libmaxminddb.a:libpcre2-8.a:libz.a \
+        -l:libmaxminddb.a -l:libpcre2-8.a -l:libz.a" \
     --add-module=ngx_headers_more \
     --add-module=ngx_zstd \
     --add-module=ngx_http_acme_module \
     --add-module=ngx_brotli \
     && make -j"$(nproc)" \
-    && strip "${NGINX_SOURCE_DIR}/objs/nginx"
+    && strip objs/nginx
 
-RUN mkdir -p /tmp/export/etc \
-        /tmp/export/usr/share/nginx \
-        /tmp/export/var/log/nginx \
-        /tmp/export/usr/sbin \
-        /tmp/export/var/cache/nginx \
-        /tmp/export/usr/lib/nginx/modules \
-    && mv "${NGINX_SOURCE_DIR}/objs/nginx" /tmp/export/usr/sbin/nginx \
-    && mv "${NGINX_SOURCE_DIR}/html" /tmp/export/usr/share/nginx/ \
-    && mv "${NGINX_SOURCE_DIR}/conf" /tmp/export/etc/nginx \
-    && mkdir -p /tmp/export/etc/nginx/conf.d \
-    && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.conf" /tmp/export/etc/nginx/nginx.conf \
-    && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.default.conf" /tmp/export/etc/nginx/conf.d/default.conf \
-    && rm -f /tmp/export/etc/nginx/koi-* \
-        /tmp/export/etc/nginx/win-utf \
-    && mv "${DOCKER_NGINX_ENTRYPOINT_DIR}/docker-entrypoint.sh" /tmp/export/ \
-    && mv "${DOCKER_NGINX_ENTRYPOINT_DIR}" /tmp/export/docker-entrypoint.d
+RUN mkdir -p /etc/nginx/conf.d /usr/share/nginx /usr/sbin /docker-entrypoint.d \
+    && cp -a "${NGINX_SOURCE_DIR}/objs/nginx" /usr/sbin/nginx \
+    && cp -a "${NGINX_SOURCE_DIR}/html" /usr/share/nginx/ \
+    && cp -a "${NGINX_SOURCE_DIR}/conf/." /etc/nginx/ \
+    && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.conf" /etc/nginx/nginx.conf \
+    && cp "${PKG_OSS_ALPINE_CONFIG_DIR}/nginx.default.conf" /etc/nginx/conf.d/default.conf \
+    && rm -f /etc/nginx/koi-* /etc/nginx/win-utf \
+    && cp -a "${DOCKER_NGINX_ENTRYPOINT_DIR}/." /docker-entrypoint.d/ \
+    && mv /docker-entrypoint.d/docker-entrypoint.sh /docker-entrypoint.sh
 
 FROM ${ALPINE_IMAGE}
 
-COPY --from=builder /tmp/export/ /
+COPY --from=builder /etc/nginx/ /etc/nginx/
+COPY --from=builder /usr/share/nginx/ /usr/share/nginx/
+COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
+COPY --from=builder /docker-entrypoint.sh /docker-entrypoint.sh
+COPY --from=builder /docker-entrypoint.d/ /docker-entrypoint.d/
+
 RUN set -x \
-    && apk add --no-cache gettext-envsubst libcrypto3 libgcc libssl3 pcre2 tzdata \
+    && apk add --no-cache gettext-envsubst libssl3 tzdata \
+    && mkdir -p /usr/lib/nginx/modules /var/cache/nginx /var/log/nginx \
     && addgroup -g 101 -S nginx \
     && adduser -S -D -H -u 101 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx \
     && ln -sf /usr/lib/nginx/modules /etc/nginx/modules \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
-    && ln -sf /dev/stderr /var/log/nginx/error.log
+    && ln -sf /dev/stderr /var/log/nginx/error.log \
+    && nginx -t
 
 EXPOSE 80/tcp 443/tcp 443/udp
 STOPSIGNAL SIGQUIT
