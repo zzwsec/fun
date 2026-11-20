@@ -1,33 +1,74 @@
 # syntax=docker/dockerfile:1
 
-FROM alpine:3.24 AS builder
+ARG ALPINE_VERSION=3.24
+ARG PHP_INI_DIR=/usr/local/etc/php
 
-ARG PHP_VERSION=8.5.9
+FROM alpine:${ALPINE_VERSION} AS builder
+
+ARG PHP_INI_DIR
+ARG PHP_VERSION=8.5.13
 ARG PHPREDIS_VERSION=6.3.0
 ARG PHP_URL="https://www.php.net/distributions/php-${PHP_VERSION}.tar.xz"
-ARG PHPIZE_DEPS="git ca-certificates curl openssl tar xz autoconf dpkg-dev dpkg file g++ gcc libc-dev make pkgconf re2c argon2-dev coreutils curl-dev gnu-libiconv-dev libsodium-dev libxml2-dev linux-headers oniguruma-dev openssl-dev patch patchutils readline-dev sqlite-dev bzip2-dev freetype-dev libjpeg-turbo-dev libpng-dev libwebp-dev gettext-dev gmp-dev openldap-dev unixodbc-dev libxslt-dev libzip-dev icu-dev"
-ARG PHP_CFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
-ARG PHP_CPPFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
-ARG PHP_LDFLAGS="-Wl,-O1 -pie"
-ARG CFLAGS="$PHP_CFLAGS"
-ARG CPPFLAGS="$PHP_CPPFLAGS"
-ARG LDFLAGS="$PHP_LDFLAGS"
 
-ARG PHP_INI_DIR=/usr/local/etc/php
-ARG PHP_BUILD_PROVIDER='https://github.com/docker-library/php'
-ARG PHP_UNAME='Linux - Docker'
-
-RUN set -eux \
-    && apk add --no-cache $PHPIZE_DEPS \
-    && curl -fsSL "$PHP_URL" | tar Jxf - -C /usr/ \
+# Install build toolchain and extension development headers, then fetch PHP source.
+# Remove musl's iconv.h so PHP links against GNU libiconv (full encoding/translit support).
+WORKDIR /usr/src/php
+RUN set -eux -o pipefail \
+    && apk add --no-cache \
+        autoconf \
+        argon2-dev \
+        bzip2-dev \
+        ca-certificates \
+        coreutils \
+        curl \
+        curl-dev \
+        file \
+        freetype-dev \
+        g++ \
+        gcc \
+        gettext-dev \
+        gmp-dev \
+        gnu-libiconv-dev \
+        icu-dev \
+        libc-dev \
+        libjpeg-turbo-dev \
+        libpng-dev \
+        libsodium-dev \
+        libwebp-dev \
+        libxml2-dev \
+        libxslt-dev \
+        libzip-dev \
+        linux-headers \
+        make \
+        oniguruma-dev \
+        openldap-dev \
+        openssl-dev \
+        pkgconf \
+        re2c \
+        readline-dev \
+        sqlite-dev \
+        tar \
+        unixodbc-dev \
+        xz \
+        zlib-dev \
+    && curl -fsSL "$PHP_URL" | tar -xJf - --strip-components=1 \
     && rm -f /usr/include/iconv.h
 
-WORKDIR /usr/php-${PHP_VERSION}
-
-RUN set -eux \
-    && gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+# Compile PHP with hardening flags scoped only to the main PHP build.
+# Explicit --prefix=/usr/local prevents "NONE/" paths in php-fpm.conf.default.
+RUN set -eux -o pipefail \
+    && export \
+        CFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64" \
+        CPPFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64" \
+        LDFLAGS="-Wl,-O1 -Wl,-z,relro,-z,now -pie" \
+        PHP_UNAME="Linux - Docker" \
     && ./configure \
-        --build="$gnuArch" \
+        --build="$(gcc -dumpmachine)" \
+        --prefix=/usr/local \
+        --sysconfdir="${PHP_INI_DIR%/php}" \
+        --with-config-file-path="$PHP_INI_DIR" \
+        --with-config-file-scan-dir="$PHP_INI_DIR/conf.d" \
+        --enable-option-checking=fatal \
         --disable-cgi \
         --disable-phpdbg \
         --enable-bcmath \
@@ -38,14 +79,10 @@ RUN set -eux \
         --enable-intl \
         --enable-mbstring \
         --enable-mysqlnd \
-        --enable-option-checking=fatal \
         --enable-pcntl \
         --enable-shmop \
         --enable-soap \
-        --sysconfdir="${PHP_INI_DIR%/php}" \
         --with-bz2 \
-        --with-config-file-path="$PHP_INI_DIR" \
-        --with-config-file-scan-dir="$PHP_INI_DIR/conf.d" \
         --with-curl \
         --with-fpm-group=www-data \
         --with-fpm-user=www-data \
@@ -55,134 +92,162 @@ RUN set -eux \
         --with-iconv=/usr \
         --with-jpeg \
         --with-ldap \
-        --with-mhash \
         --with-mysqli \
         --with-openssl \
         --with-password-argon2 \
         --with-pdo-mysql \
-        --with-pdo-sqlite=/usr \
-        --with-pear \
+        --with-pdo-sqlite \
         --with-pic \
         --with-readline \
-        --with-sodium=shared \
-        --with-sqlite3=/usr \
+        --with-sodium \
+        --with-sqlite3 \
         --with-unixODBC \
         --with-webp \
         --with-xsl \
-        --with-zlib \
         --with-zip \
-    && make -j$(nproc) \
+        --with-zlib \
+    && make -j"$(nproc)" \
+    && find . -type f -name '*.a' -delete \
     && make install
 
-RUN set -eux \
-    && git clone --depth 1 --branch "${PHPREDIS_VERSION}" https://github.com/phpredis/phpredis.git /usr/phpredis \
-    && cd /usr/phpredis \
+
+# Compile phpredis as a shared module using PIC/RELRO flags
+WORKDIR /usr/src/phpredis
+RUN set -eux -o pipefail \
+    && curl -fsSL "https://codeload.github.com/phpredis/phpredis/tar.gz/refs/tags/${PHPREDIS_VERSION}" \
+        | tar -xzf - --strip-components=1 \
+    && export \
+        CFLAGS="-fstack-protector-strong -fpic -O2" \
+        CPPFLAGS="-fstack-protector-strong -fpic -O2" \
+        LDFLAGS="-Wl,-O1 -Wl,-z,relro,-z,now" \
     && phpize \
     && ./configure --with-php-config=/usr/local/bin/php-config \
-    && make -j$(nproc) \
+    && make -j"$(nproc)" \
     && make install
 
-RUN set -eux \
-    && find /usr/local/ -type f -perm '/0111' -exec sh -c ' \
+# Prune build-only files from /usr/local, strip ELF binaries/extensions, and install production php.ini.
+RUN set -eux -o pipefail \
+    && rm -rf \
+        /usr/local/bin/php-config \
+        /usr/local/bin/phpize \
+        /usr/local/include/php \
+        /usr/local/lib/php/build \
+        /usr/local/php/man \
+    && find /usr/local -type f \( -perm /0111 -o -name '*.so' \) -exec sh -c ' \
         for f; do \
             if file "$f" | grep -q "ELF"; then \
                 strip --strip-unneeded "$f"; \
-            fi \
+            fi; \
         done \
-        ' sh {} + \
+    ' sh {} + \
     && mkdir -p "${PHP_INI_DIR}/conf.d" \
-    && cp /usr/php-${PHP_VERSION}/php.ini-production "${PHP_INI_DIR}/php.ini" \
-    && curl -fsSL https://github.com/docker-library/php/archive/refs/heads/master.tar.gz | \
-            tar zxf - -C /usr/local/bin/ php-master/docker-php-entrypoint php-master/docker-php-ext-configure php-master/docker-php-ext-enable php-master/docker-php-ext-install --strip-components=1
+    && cp /usr/src/php/php.ini-production "${PHP_INI_DIR}/php.ini"
 
 WORKDIR /usr/local/etc
 
-RUN <<EOF
+# Generate FPM entrypoint, FPM pool configs, and modular PHP INI files.
+RUN <<'EOF'
 set -eux
 
-sed 's|=NONE/|=|g' php-fpm.conf.default > php-fpm.conf
-rm -f php-fpm.d/*.conf php-fpm.conf.default php-fpm.d/www.conf.default
+# Inline FPM-specific entrypoint (avoids fetching unpinned scripts from GitHub master).
+cat <<'INNER_EOF' > /usr/local/bin/docker-php-entrypoint
+#!/bin/sh
+set -e
+
+# Prepend php-fpm if the first argument is a flag (e.g. -t or -F).
+if [ "${1#-}" != "$1" ]; then
+    set -- php-fpm "$@"
+fi
+
+exec "$@"
+INNER_EOF
+chmod +x /usr/local/bin/docker-php-entrypoint
+
+mv php-fpm.conf.default php-fpm.conf
+rm -f php-fpm.d/*.conf php-fpm.d/www.conf.default
 
 cat <<'INNER_EOF' > php-fpm.d/00-global.conf
 [global]
 error_log = /proc/self/fd/2
 
-; https://github.com/docker-library/php/pull/725#issuecomment-443540114
+; Raise log line limit to prevent truncating long stack traces.
 log_limit = 8192
 
-; Keep PHP-FPM in the foreground as PID 1 in the container.
+; Run PHP-FPM in the foreground as PID 1.
 daemonize = no
 INNER_EOF
 
 cat <<'INNER_EOF' > php-fpm.d/10-www.conf
 [www]
-user = www-data
-group = www-data
+; Container runs directly as non-root www-data, so user/group directives are omitted.
 
-; Listen on all container interfaces. Docker controls whether port 9000 is published externally.
+; Listen on all container interfaces; host exposure is controlled by Docker/orchestrator.
 listen = 9000
 listen.backlog = 1024
 
 pm = dynamic
 pm.max_children = 10
 pm.start_servers = 2
-pm.min_spare_servers = 1
+pm.min_spare_servers = 2
 pm.max_spare_servers = 5
 
-; Recycle workers periodically to release memory retained by PHP extensions or third-party libraries.
+; Recycle workers periodically to mitigate memory growth in extensions or libraries.
 pm.max_requests = 500
 
-; PHP has max_execution_time, but this provides a PHP-FPM-level hard limit for stuck requests.
+; Hard FPM-level timeout for stuck requests (complements PHP max_execution_time).
 request_terminate_timeout = 60s
 
-; Dump a PHP backtrace for requests taking longer than 5 seconds.
+; Log PHP backtraces for requests slower than 5 seconds.
 request_slowlog_timeout = 5s
 request_slowlog_trace_depth = 20
 slowlog = /proc/self/fd/2
 
-; php-fpm closes STDOUT on startup, so sending logs to /proc/self/fd/1 does not work.
-; https://bugs.php.net/bug.php?id=73886
+; PHP-FPM closes stdout on startup; route access logs to stderr instead.
 access.log = /proc/self/fd/2
 
-; Preserve Docker environment variables for PHP workers.
+; Preserve container environment variables for PHP workers.
 clear_env = no
 
-; Ensure worker stdout and stderr are sent to the main error log.
+; Forward worker stdout/stderr to the main error log without extra prefixing.
 catch_workers_output = yes
 decorate_workers_output = no
 
-; Only allow PHP scripts to be executed through this FPM pool.
+; Restrict FPM execution strictly to .php scripts.
 security.limit_extensions = .php
 INNER_EOF
 
 cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/00-fpm.ini"
-; https://github.com/docker-library/php/issues/878#issuecomment-938595965
+; Avoid duplicate error logs when catch_workers_output is enabled.
 fastcgi.logging = Off
 INNER_EOF
 
 cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/10-opcache.ini"
+; OPcache is built into PHP core as of PHP 8.5 (no zend_extension line needed).
 [opcache]
 opcache.enable = 1
 opcache.enable_cli = 0
 
-; Shared OPcache memory used by all PHP-FPM workers.
+; Shared opcode memory across all PHP-FPM workers.
 opcache.memory_consumption = 128
 opcache.interned_strings_buffer = 16
 opcache.max_accelerated_files = 20000
 
-; Containers are immutable: PHP-FPM is restarted when a new image is deployed.
-; opcache.validate_timestamps = 0
+; Disable filesystem timestamp checks for immutable container deployments.
+opcache.validate_timestamps = 0
 
-; Check mounted PHP files for changes and revalidate cached scripts every second.
-opcache.validate_timestamps = 1
-opcache.revalidate_freq = 1
-
-; Preserve PHPDoc comments used by frameworks, annotations and reflection.
+; Retain PHPDoc comments required by frameworks, annotations, and reflection.
 opcache.save_comments = 1
 
-; JIT is generally not useful for typical PHP web workloads.
-opcache.jit = off
+; Explicitly disable JIT for typical I/O-bound web workloads (cross-version safe).
+opcache.jit = disable
 opcache.jit_buffer_size = 0
+INNER_EOF
+
+cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/15-performance.ini"
+memory_limit = 128M
+
+; Extend realpath cache TTL for immutable container filesystems (default size is already 4096K).
+realpath_cache_ttl = 600
 INNER_EOF
 
 cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/20-security.ini"
@@ -191,9 +256,8 @@ expose_php = Off
 display_errors = Off
 display_startup_errors = Off
 allow_url_fopen = Off
-allow_url_include = Off
 
-; Session security
+; Session hardening
 session.use_strict_mode = 1
 session.use_only_cookies = 1
 session.cookie_httponly = 1
@@ -207,36 +271,34 @@ INNER_EOF
 cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/40-redis.ini"
 extension = redis.so
 INNER_EOF
-
-cat <<'INNER_EOF' > "${PHP_INI_DIR}/conf.d/41-sodium.ini"
-extension = sodium.so
-INNER_EOF
-
 EOF
 
-RUN php --version \
-    && php --ini \
-    && php -m
+FROM alpine:${ALPINE_VERSION}
 
-FROM alpine:3.24
+ARG PHP_INI_DIR
+
+ENV TZ=Asia/Shanghai \
+    PHP_INI_DIR=${PHP_INI_DIR}
 
 WORKDIR /var/www/html
 
-ENV TZ=Asia/Shanghai
-
 COPY --from=builder /usr/local/ /usr/local/
 
-RUN set -eux \
+RUN set -eux -o pipefail \
     && adduser -u 82 -D -S -G www-data www-data \
     && chown www-data:www-data /var/www/html \
-    && runDeps="$( \
+    && run_deps="$( \
         scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
             | tr ',' '\n' \
             | sort -u \
-            | awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+            | awk 'NF && system("[ -e /usr/local/lib/" $1 " ]") != 0 { print "so:" $1 }' \
     )" \
-    && apk add --no-cache $runDeps tzdata \
-    && php-fpm -t
+    && apk add --no-cache $run_deps ca-certificates tzdata
+
+USER www-data
+
+# Validate FPM configuration under the actual runtime user.
+RUN php-fpm -t
 
 EXPOSE 9000
 STOPSIGNAL SIGQUIT
